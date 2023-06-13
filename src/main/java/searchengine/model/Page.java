@@ -33,13 +33,6 @@ public class Page implements Serializable {
     }
 
     @Override
-    public boolean equals(Object obj) {
-        Page p = (Page) obj;
-        return site == null ||
-                getClass() == obj.getClass() && path.equals(p.path) && site == p.site;
-    }
-
-    @Override
     public String toString() {
         return "id: " + id + ", siteId: " + site.getId() + ", path: " + path;
     }

@@ -16,11 +16,15 @@ spring:
 
 indexing-settings:
   sites:
-    - url: http://t-logistick.ru
-      name: Т-логистик
-    - url: https://itgit.ru
-      name: АвтоВизор
-#    - url: https://www.svetlovka.ru
-#      name: Светловка
-#    - url: https://www.lutherancathedral.ru
-#      name: Кафедральный собор святых Петра и Павла
+#    - url: https://itgit.ru
+#      name: ООО "АвтоВизор"
+#    - url: http://t-logistick.ru
+#      name: Т-логистик
+    - url: https://skillbox.ru
+      name: СкиллБокс
+    - url: https://www.svetlovka.ru
+      name: Светловка
+    - url: https://dombulgakova.ru
+      name: Дом Булгакова
+    - url: https://www.lutherancathedral.ru
+      name: Кафедральный собор святых Петра и Павла

@@ -57,33 +57,50 @@ public class SearchServiceImpl implements SearchService {
             lemmasFromRequest = new ArrayList<>();
         }
         List<Index> indexesFromRequest = getIndicesFromRequest(lemmasFromRequest, url);
-        List<Index> indexPageList = new ArrayList<>();
+        List<Page> resultPages = new ArrayList<>();
         for(Lemma l : lemmasFromRequest) {
-            List<Index> tempIndex = selectNextLemmaIndices(l, indexesFromRequest, indexPageList);
-            if (!tempIndex.isEmpty()) {
-                indexPageList = tempIndex;
+            List<Page> tempPages = new ArrayList<>();
+            if (resultPages.isEmpty()){
+                tempPages = fillResultPagesList(indexesFromRequest, l);
+            }else {
+                tempPages = selectNextLemmaPages(l, resultPages, indexesFromRequest);
+            }
+            if (!tempPages.isEmpty()) {
+                resultPages = tempPages;
             }
         }
-        List<Page> pageList = new ArrayList<>();
-        for (Index i : indexPageList) {
-            pageList.add(i.getPage());
+        List<Index> resultIndices = new ArrayList<>();
+        for (Index i : indexesFromRequest) {
+            if (resultPages.contains(i.getPage())){
+                resultIndices.add(i);
+            }
         }
 
-        HashMap<Page, Float> pageAbsRelevance = getPageAbsRelevance(pageList, indexPageList);
-        List<SearchResponseData> searchResponseDataList = getSearchResponseData(pageAbsRelevance, indexPageList);
-        return new ResponseEntity<>(new SearchResponse(searchResponseDataList, searchResponseDataList.size()), HttpStatus.OK);
+        HashMap<Page, Float> pageAbsRelevance = getPageAbsRelevance(resultPages, resultIndices);
+        List<SearchResponseData> searchResponseDataList = getSearchResponseData(pageAbsRelevance, resultIndices);
+        List<SearchResponseData> searchListLimits = new ArrayList<>();
+        searchListLimits = (searchResponseDataList.size() + offset) > limit? searchResponseDataList.subList(offset, limit) : searchResponseDataList;
+        return new ResponseEntity<>(new SearchResponse(searchListLimits, searchListLimits.size()), HttpStatus.OK);
     }
 
-    private List<Index> selectNextLemmaIndices(Lemma l, List<Index> indexesFromRequest, List<Index> indexPageList) {
-        List<Index> tempIndex = new ArrayList<>();
-        for (Index i : indexesFromRequest) {
-            if (i.getLemma().getLemma().equals(l.getLemma()) && indexPageList.isEmpty()) {
-                tempIndex.add(i);
-            } else if (i.getLemma().getLemma().equals(l.getLemma()) && indexPageList.contains(i)) {
-                tempIndex.add(i);
+    private List<Page> fillResultPagesList(List<Index> tempIndex, Lemma lemma) {
+        List<Page> result = new ArrayList<>();
+        for (Index i : tempIndex) {
+            if (i.getLemma().getLemma().equals(lemma.getLemma())) {
+                result.add(i.getPage());
             }
         }
-        return tempIndex;
+        return result;
+    }
+
+    private List<Page> selectNextLemmaPages(Lemma l, List<Page> pageList, List<Index> indexList) {
+        List<Page> tempPage = new ArrayList<>();
+        for (Index i : indexList) {
+            if (i.getLemma().getLemma().equals(l.getLemma()) && pageList.contains(i.getPage())){
+                tempPage.add(i.getPage());
+            }
+        }
+        return tempPage;
     }
 
     private List<Index> getIndicesFromRequest(List<Lemma> lemmasFromRequest, String url) {
@@ -117,19 +134,24 @@ public class SearchServiceImpl implements SearchService {
         Map<String, Integer> requestLemmas = lemmaFinder.collectLemmas(searchText);
         List<Lemma> listOfLemmasOnSite = lemmaRepository.findAllBySite(site);
         for (String lemma : requestLemmas.keySet()) {
-            lemmasFromRequest.add(findRequestLemmaInBase(lemma, listOfLemmasOnSite));
+            lemmasFromRequest.addAll(findRequestLemmaInBase(lemma, listOfLemmasOnSite));
         }
         lemmasFromRequest.sort((o1, o2) -> o1.getFrequency() - o2.getFrequency());
         return lemmasFromRequest;
     }
 
-    private Lemma findRequestLemmaInBase(String lemma, List<Lemma> listOfLemmasOnSite) {
+    private List<Lemma> findRequestLemmaInBase(String lemma, List<Lemma> listOfLemmasOnSite) {
+        List<Lemma> lemmas = new ArrayList<>();
+        int maxFrequency = (int) (listOfLemmasOnSite.stream().max((l1, l2 )-> l1.getFrequency() - l2.getFrequency()).get().getFrequency()*0.9);
         for (Lemma lemmaOnSite : listOfLemmasOnSite) {
-            if (lemmaOnSite.getLemma().equals(lemma)) {
-                return lemmaOnSite;
+            if (lemmaOnSite.getLemma().equals(lemma) && lemmaOnSite.getFrequency() > maxFrequency){
+                return lemmas;
+            } else if (lemmaOnSite.getLemma().equals(lemma)) {
+                lemmas.add(lemmaOnSite);
+                return lemmas;
             }
         }
-        throw new SearchException("Леммы в базе не найдены");
+        throw new SearchException("Лемма в базе не найдена");
     }
 
     private List<SearchResponseData> getSearchResponseData(HashMap<Page, Float> pageAbsRelevance, List<Index> indexPageList) throws IOException {
@@ -139,44 +161,69 @@ public class SearchServiceImpl implements SearchService {
             String uri = entry.getKey().getPath().replaceFirst(entry.getKey().getSite().getUrl(), "");
             String title = contentString.substring(contentString.indexOf("<title>") + 7, contentString.indexOf("</title>"));
             String snippet = getSnippetFromIndex(entry.getKey().getPath(), indexPageList);
-            list.add(new SearchResponseData(entry.getKey().getSite().getUrl(),
-                    entry.getKey().getSite().getName(), uri, title, snippet, entry.getValue()));
+            if (snippet.matches(".*[а-яА-Я0-9].*")){
+                list.add(new SearchResponseData(entry.getKey().getSite().getUrl(),
+                        entry.getKey().getSite().getName(), uri, title, snippet, entry.getValue()));
+            }
         }
         return list;
     }
 
     private String getSnippetFromIndex(String path, List<Index> indexPageList) throws IOException {
         String snippet = "";
+        List<String> lemmasFromRequest = new ArrayList<>();
+        for (Index i :indexPageList) {
+            if (!lemmasFromRequest.contains(i.getLemma().getLemma())){
+                lemmasFromRequest.add(i.getLemma().getLemma());
+            }
+        }
         for (Index index : indexPageList) {
             if (path.equals(index.getPage().getPath())) {
                 String lemma = index.getLemma().getLemma();
-                snippet = getSnippet(lemma, clear(index.getPage().getContent(), "body"));
+                snippet = snippet + " ... " +  getSnippet(lemma, lemmasFromRequest, clear(index.getPage().getContent(), "body"));
             }
         }
         return snippet;
     }
 
 
-    private String getSnippet(String lemma, String content) throws IOException {
+    private String getSnippet(String lemma, List<String> lemmasFromRequest, String content) throws IOException {
         LemmaFinder lemmaFinder = LemmaFinder.getInstance();
         String snippet = "";
-        int lemmaId = 0;
+        int lemmaId = -1;
         String[] words = content.split(" ");
         for (int i = 0; i < words.length; i++) {
-            if (lemmaFinder.collectLemmas(words[i]).keySet().contains(lemma)) {
+            if (lemmaFinder.collectLemmas(words[i]).containsKey(lemma)) {
                 lemmaId = i;
+                break;
             }
         }
-        for (int i = 15; i > 0; i--) {
-            if (lemmaId > i) {
+        if (lemmaId == -1) return snippet;
+        for (int i = 5; i > 0; i--) {
+            if (lemmaId > i && isWordToSnippet(words[lemmaId - i], lemmasFromRequest, lemmaFinder)) {
+                snippet = snippet + "<b>" + words[lemmaId - i] + "</b>" +  " ";
+            }else if (lemmaId > i){
                 snippet = snippet + words[lemmaId - i] + " ";
             }
         }
         snippet = snippet + "<b>" + words[lemmaId] + "</b>";
-        for (int i = 1; i < 16 && (lemmaId + i) < words.length; i++) {
-            snippet = snippet + " " + words[lemmaId + i];
+        for (int i = 1; i < 5 && (lemmaId + i) < words.length; i++) {
+            if (isWordToSnippet(words[lemmaId + i], lemmasFromRequest, lemmaFinder)){
+                snippet = snippet + " " + "<b>" + words[lemmaId + i] + "</b>";
+            }else {
+                snippet = snippet + " " + words[lemmaId + i];
+            }
         }
         return snippet;
+    }
+
+    private boolean isWordToSnippet(String word, List<String> lemmasFromRequest, LemmaFinder lemmaFinder) {
+        for (String s : lemmaFinder.collectLemmas(word).keySet()) {
+            if (lemmasFromRequest.contains(s.toLowerCase())){
+                return true;
+            }
+        }
+        return false;
     }
 
     private String clear(String content, String selector) {
