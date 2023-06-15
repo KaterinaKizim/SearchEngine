@@ -26,10 +26,12 @@ public class SearchServiceImpl implements SearchService {
     private final SiteRepository siteRepository;
     private final LemmaRepository lemmaRepository;
     private final IndexRepository indexRepository;
+    private int limit;
 
 
     @Override
     public ResponseEntity<? extends Response> allSitesSearch(String searchText, String url, int offset, int limit) throws IOException {
+        this.limit = limit;
         if (searchText.isEmpty())
             return new ResponseEntity<>(new ErrorResponse("Задан пустой поисковый запрос"), HttpStatus.BAD_REQUEST);
         Optional<Site> siteOptional = siteRepository.findByUrl(url);
@@ -77,6 +79,7 @@ public class SearchServiceImpl implements SearchService {
         }
 
         HashMap<Page, Float> pageAbsRelevance = getPageAbsRelevance(resultPages, resultIndices);
+        System.out.println("ТЫК!");
         List<SearchResponseData> searchResponseDataList = getSearchResponseData(pageAbsRelevance, resultIndices);
         List<SearchResponseData> searchListLimits = new ArrayList<>();
         searchListLimits = (searchResponseDataList.size() + offset) > limit? searchResponseDataList.subList(offset, limit) : searchResponseDataList;
@@ -142,7 +145,7 @@ public class SearchServiceImpl implements SearchService {
 
     private List<Lemma> findRequestLemmaInBase(String lemma, List<Lemma> listOfLemmasOnSite) {
         List<Lemma> lemmas = new ArrayList<>();
-        int maxFrequency = (int) (listOfLemmasOnSite.stream().max((l1, l2 )-> l1.getFrequency() - l2.getFrequency()).get().getFrequency()*0.9);
+        int maxFrequency = (int) (listOfLemmasOnSite.stream().max((l1, l2 )-> l1.getFrequency() - l2.getFrequency()).get().getFrequency());
         for (Lemma lemmaOnSite : listOfLemmasOnSite) {
             if (lemmaOnSite.getLemma().equals(lemma) && lemmaOnSite.getFrequency() > maxFrequency){
                 return lemmas;
@@ -165,6 +168,7 @@ public class SearchServiceImpl implements SearchService {
                 list.add(new SearchResponseData(entry.getKey().getSite().getUrl(),
                         entry.getKey().getSite().getName(), uri, title, snippet, entry.getValue()));
             }
+            if (list.size() >= limit) break;
         }
         return list;
     }
@@ -188,6 +192,21 @@ public class SearchServiceImpl implements SearchService {
 
 
     private String getSnippet(String lemma, List<String> lemmasFromRequest, String content) throws IOException {
+        int wordCountForSnippet;
+        switch (lemmasFromRequest.size()){
+            case (1):
+                wordCountForSnippet = 15;
+                break;
+            case (2):
+                wordCountForSnippet = 8;
+                break;
+            case (3):
+                wordCountForSnippet = 6;
+                break;
+            default:
+                wordCountForSnippet = 4;
+                break;
+        }
         LemmaFinder lemmaFinder = LemmaFinder.getInstance();
         String snippet = "";
         int lemmaId = -1;
@@ -199,7 +218,7 @@ public class SearchServiceImpl implements SearchService {
             }
         }
         if (lemmaId == -1) return snippet;
-        for (int i = 5; i > 0; i--) {
+        for (int i = wordCountForSnippet; i > 0; i--) {
             if (lemmaId > i && isWordToSnippet(words[lemmaId - i], lemmasFromRequest, lemmaFinder)) {
                 snippet = snippet + "<b>" + words[lemmaId - i] + "</b>" +  " ";
             }else if (lemmaId > i){
@@ -207,7 +226,7 @@ public class SearchServiceImpl implements SearchService {
             }
         }
         snippet = snippet + "<b>" + words[lemmaId] + "</b>";
-        for (int i = 1; i < 5 && (lemmaId + i) < words.length; i++) {
+        for (int i = 1; i < wordCountForSnippet && (lemmaId + i) < words.length; i++) {
             if (isWordToSnippet(words[lemmaId + i], lemmasFromRequest, lemmaFinder)){
                 snippet = snippet + " " + "<b>" + words[lemmaId + i] + "</b>";
             }else {
